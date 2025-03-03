@@ -680,7 +680,7 @@ class PETRHeadM(AnchorFreeHead):
         if sampling_result.num_gts > 0:
             labels[pos_inds] = gt_labels[sampling_result.pos_assigned_gt_inds]
             bbox_weights[pos_inds] = 1.0
-            bbox_targets[pos_inds] = sampling_result.pos_gt_bboxes
+            bbox_targets[pos_inds] = sampling_result.pos_gt_bboxes.to(bbox_pred.dtype)
 
         return (labels, label_weights,
                 bbox_targets, bbox_weights,

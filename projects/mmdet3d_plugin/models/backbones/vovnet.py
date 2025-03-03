@@ -15,6 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.batchnorm import _BatchNorm
 
+from mmcv.runner import force_fp32, auto_fp16
 
 VoVNet19_slim_dw_eSE = {
     'stem': [64, 64, 64],
@@ -317,7 +318,7 @@ class VoVNet(BaseModule):
         in_ch_list = stem_out_ch + config_concat_ch[:-1]
         # OSA stages
         self.stage_names = []
-        for i in range(4):  # num_stages
+        for i in range(3):  # num_stages
             name = "stage%d" % (i + 2)  # stage 2 ... stage 5
             self.stage_names.append(name)
             self.add_module(

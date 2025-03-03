@@ -96,6 +96,64 @@ def parse_args():
     return args
 
 
+def count_parameters(model,logger):
+    """Count parameters for each module in the model"""
+    # counts = {}
+    
+    # # Count total parameters
+    # total_params = sum(p.numel() for p in model.parameters())
+    # trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    # print(f"Total parameters: {total_params:,}")
+    # print(f"Trainable parameters: {trainable_params:,}")
+    
+    # # Count by major components
+    # for name, module in model.named_children():
+    #     params = sum(p.numel() for p in module.parameters())
+    #     counts[name] = params
+    #     print(f"{name}: {params:,} parameters ({params/total_params*100:.2f}%)")
+        
+    #     # Detail breakdown for major components
+    #     if name in ['img_backbone', 'img_neck', 'pts_bbox_head', 'map_head', 'lm_head']:
+    #         print(f"  {name} breakdown:")
+    #         for subname, submodule in module.named_children():
+    #             subparams = sum(p.numel() for p in submodule.parameters())
+    #             if subparams > 0:
+    #                 print(f"    {subname}: {subparams:,} parameters")
+    
+    # return counts
+    # replace all print with logger.info
+    counts = {}
+    
+    # Count total parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    logger.info(f"Total parameters: {total_params:,}")
+    logger.info(f"Trainable parameters: {trainable_params:,}")
+    
+    # Count by major components
+    for name, module in model.named_children():
+        params = sum(p.numel() for p in module.parameters())
+        counts[name] = params
+        logger.info(f"{name}: {params:,} parameters ({params/total_params*100:.2f}%)")
+        trainables = sum(p.numel() for p in module.parameters() if p.requires_grad)
+        logger.info(f"{name}: {trainables:,} trainable parameters({trainables/trainable_params*100:.2f}%)")
+        
+        # Detail breakdown for major components
+        if name in ['img_backbone', 'img_neck', 'pts_bbox_head', 'map_head', 'lm_head']:
+            logger.info(f"  {name} breakdown:")
+            for subname, submodule in module.named_children():
+                subparams = sum(p.numel() for p in submodule.parameters())
+                if subparams > 0:
+                    logger.info(f"    {subname}: {subparams:,} parameters")
+                    trainables = sum(p.numel() for p in submodule.parameters() if p.requires_grad)
+                    logger.info(f"    {subname}: {trainables:,} trainable parameters")
+                    
+    return counts
+
+
+
 def main():
     args = parse_args()
 
@@ -222,6 +280,15 @@ def main():
         logger.info("Using SyncBN")
         
     logger.info(f'Model:\n{model}')
+    count_parameters(model, logger)
+    
+    # change the model to be fp16
+    # # if cfg.get('fp16', None):
+    # wrap_fp16_model(model)
+    # logger.info('Model is wrapped by Fp16')
+    
+    # log the device of the model
+    
     datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)
@@ -248,6 +315,13 @@ def main():
             if hasattr(datasets[0], 'PALETTE') else None)
     # add an attribute for visualization convenience
     model.CLASSES = datasets[0].CLASSES
+    
+    # log the dtype of the model 
+    for name, param in model.named_parameters():
+        logger.info(f"{name}: {param.dtype}, {param.requires_grad}, {param.device}")
+        if "lm_head" in name:
+            logger.info(param.data.shape)
+        
     custom_train_model(
         model,
         datasets,

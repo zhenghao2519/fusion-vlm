@@ -18,8 +18,8 @@ class_names = [
     'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
 ]
 
-num_gpus = 8
-batch_size = 2
+num_gpus = 1
+batch_size = 1
 num_iters_per_epoch = 28130 // (num_gpus * batch_size)
 num_epochs = 6
 llm_path = 'ckpts/pretrain_qformer/'
@@ -38,7 +38,20 @@ model = dict(
     frozen=False,
     use_lora=True,
     tokenizer=llm_path,
-    lm_head=llm_path, # set to None if don't use llm head
+    lm_head=llm_path,#llm_path, # set to None if don't use llm head
+    # img_backbone=dict(
+    #     type='VoVNet',
+    #     spec_name='V-99-eSE',
+    #     norm_eval=True,
+    #     # num_stages=4,
+    #     frozen_stages=-1,
+    #     input_ch=3,
+    #     out_features=('stage4')), #,'stage5',
+    # img_neck=dict(
+    #     type='CPFPN',
+    #     in_channels=[768], # 1024
+    #     out_channels=256,
+    #     num_outs=2),
     img_backbone=dict(
         type='EVAViT',
         img_size=640, 
@@ -56,7 +69,7 @@ model = dict(
         drop_path_rate=0.3,
         flash_attn=True,
         with_cp=True, 
-        frozen=False,), 
+        frozen=True,), 
     map_head=dict(
         type='PETRHeadM',
         num_classes=1,
@@ -69,7 +82,7 @@ model = dict(
         num_lanes_one2one=300,
         k_one2many=5,
         lambda_one2many=1.0,
-        num_extra=256,
+        num_extra=256, #number of cariar queries
         n_control=11,
         pc_range=point_cloud_range,
         code_weights = [1.0, 1.0],
@@ -277,6 +290,8 @@ optimizer = dict(constructor='LearningRateDecayOptimizerConstructor', type='Adam
                                 })
 
 optimizer_config = dict(type='Fp16OptimizerHook', loss_scale='dynamic', grad_clip=dict(max_norm=35, norm_type=2))
+# fp16 = dict(loss_scale='dynamic')
+
 # learning policy
 lr_config = dict(
     policy='CosineAnnealing',
@@ -293,4 +308,5 @@ checkpoint_config = dict(interval=num_iters_per_epoch//2, max_keep_ckpts=3)
 runner = dict(
     type='IterBasedRunner', max_iters=num_epochs * num_iters_per_epoch)
 load_from='ckpts/eva02_petr_proj.pth'
+# load_from='ckpts/fcos3d_vovnet_imgbackbone-remapped.pth'
 resume_from=None

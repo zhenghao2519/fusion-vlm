@@ -29,6 +29,8 @@ import mmcv
 from projects.mmdet3d_plugin.models.utils.misc import MLN
 from mmdet.models.utils.transformer import inverse_sigmoid
 import time
+
+
 @DETECTORS.register_module()
 class Petr3D(MVXTwoStageDetector):
     """Petr3D."""
@@ -131,6 +133,46 @@ class Petr3D(MVXTwoStageDetector):
             self.lm_head = load_model(lm_head, use_lora, frozen)
 
         self.test_flag = False
+        
+        self.fp16_enabled = True
+        self.img_backbone.fp16_enabled = True
+        # self.img_neck.fp16_enabled = True
+        
+        self.pts_bbox_head.fp16_enabled = True
+        if map_head is not None:
+            self.map_head.fp16_enabled = True
+        # self.lm_head.fp16_enabled = True
+        if self.with_lm_head:
+            # self.lm_head.fp16_enabled = True
+            print("init lm_head device", self.lm_head.device)
+            
+    
+        if not self.with_lm_head:
+            if self.with_map_head:
+                unused_params = [
+                    self.pts_bbox_head.output_projection.weight,
+                    self.pts_bbox_head.output_projection.bias,
+                    self.pts_bbox_head.can_bus_embed[0].weight,
+                    self.pts_bbox_head.can_bus_embed[0].bias,
+                    self.pts_bbox_head.can_bus_embed[2].weight,
+                    self.pts_bbox_head.can_bus_embed[2].bias,
+                    self.map_head.output_projection.weight,
+                    self.map_head.output_projection.bias
+                ]
+            else:
+                unused_params = [
+                    self.pts_bbox_head.output_projection.weight,
+                    self.pts_bbox_head.output_projection.bias,
+                    self.pts_bbox_head.can_bus_embed[0].weight,
+                    self.pts_bbox_head.can_bus_embed[0].bias,
+                    self.pts_bbox_head.can_bus_embed[2].weight,
+                    self.pts_bbox_head.can_bus_embed[2].bias
+                ]
+        
+            for param in unused_params:
+                # set requires_grad to False
+                param.requires_grad = False
+        
 
     @property
     def with_map_head(self):
@@ -178,6 +220,7 @@ class Petr3D(MVXTwoStageDetector):
 
 
     @auto_fp16(apply_to=('img'), out_fp32=True)
+    # @auto_fp16(apply_to=('img'))
     def extract_feat(self, img):
         """Extract features from images and points."""
         img_feats = self.extract_img_feat(img)
@@ -289,8 +332,15 @@ class Petr3D(MVXTwoStageDetector):
 
             
         if self.with_lm_head:
-            vision_embeded = torch.cat([vision_embeded_obj, vision_embeded_map], dim=1)
+            if not self.with_map_head:
+                vision_embeded = vision_embeded_obj
+            else:
+                vision_embeded = torch.cat([vision_embeded_obj, vision_embeded_map], dim=1)
+            # print("lm_head device", self.lm_head.device, input_ids.device, vlm_labels.device, vision_embeded.device)
+            # print("lm_head class type", self.lm_head.__class__)
+            print("does any input contain nan", torch.isnan(input_ids).any(), torch.isnan(vlm_labels).any(), torch.isnan(vision_embeded).any())
             vlm_loss = self.lm_head(input_ids=input_ids, attention_mask=vlm_attn_mask, labels=vlm_labels, images=vision_embeded, use_cache=False)
+            # print(vlm_loss.dtype)
             losses.update(vlm_loss=vlm_loss[0])
             
         if self.with_img_roi_head:
@@ -300,7 +350,7 @@ class Petr3D(MVXTwoStageDetector):
 
         return losses
 
-    # @force_fp32(apply_to=('img'))
+
     def forward(self, return_loss=True, **data):
         """Calls either forward_train or forward_test depending on whether
         return_loss=True.
@@ -374,12 +424,21 @@ class Petr3D(MVXTwoStageDetector):
             vlm_attn_mask = None
 
         data['img_feats'] = self.extract_feat(data['img'])
-
+        if self.with_lm_head:
+            print("lm_head device", self.lm_head.device, input_ids.device)
+            
+        # for name, param in self.named_parameters():
+        #     print(f"{name}: {param.dtype}, {param.requires_grad}, {param.device}")
+        
         losses = self.forward_pts_train(gt_bboxes_3d,
                                     gt_labels_3d, gt_bboxes,
                                     gt_labels, img_metas, centers2d, 
                                     depths, input_ids, vlm_labels, vlm_attn_mask, lane_pts, **data)
-
+        
+        
+        print(losses)
+        if self.with_lm_head:
+            print("lm_head device", self.lm_head.device)
         return losses
   
   

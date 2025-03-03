@@ -5,7 +5,8 @@ from mmdet.core import bbox_xyxy_to_cxcywh
 from mmdet.models.utils.transformer import inverse_sigmoid
 from peft import LoraConfig, get_peft_model
 from ..dense_heads.llava_llama import LlavaLlamaForCausalLM
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from transformers import BitsAndBytesConfig
 
 
 def memory_refresh(memory, prev_exist):
@@ -218,8 +219,22 @@ def transform_reference_points_lane(reference_points, egopose, reverse=False, tr
     return reference_points
 
 def load_model(base_model, use_lora, frozen):
-    model = LlavaLlamaForCausalLM.from_pretrained(base_model, torch_dtype=torch.float16, device_map='cpu')
-    model.gradient_checkpointing_enable()
+    # model = LlavaLlamaForCausalLM.from_pretrained(base_model, torch_dtype=torch.float16, device_map='cpu')
+    # model = LlavaLlamaForCausalLM.from_pretrained(
+    #     base_model,
+    #     load_in_8bit=True,  # Enable INT8 quantization
+    #     device_map="auto" ,  # Let the library decide optimal device mapping
+    #     # llm_int8_enable_fp32_cpu_offload = True,  # Enable CPU offload for FP32 computation
+    # )
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16
+    )
+    model = LlavaLlamaForCausalLM.from_pretrained(base_model, device_map='auto', quantization_config=quantization_config)
+    # model = LlavaLlamaForCausalLM.from_pretrained(base_model, device_map='auto', load_in_4bit=True,bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True)
+    # model = LlavaLlamaForCausalLM.from_pretrained(base_model, device_map='auto', load_in_8bit=True, bnb_8bit_compute_dtype=torch.bfloat16, bnb_8bit_use_double_quant=True)
     
     if frozen:
         model.eval()
@@ -227,16 +242,30 @@ def load_model(base_model, use_lora, frozen):
             p.requires_grad = False
             
     if use_lora:
+        model.gradient_checkpointing_enable()
+        model = prepare_model_for_kbit_training(model)
+        """
+        28G for rank 4
+        """
         peft_config = LoraConfig(
-                r=16,
-                lora_alpha=16,
-                target_modules=("q_proj", "k_proj", "v_proj", "o_proj"),
+                r=8,
+                lora_alpha=8,
+                target_modules=( "k_proj", "v_proj",  "o_proj"), # "q_proj", , "o_proj"
                 lora_dropout=0.05,
                 bias="none",
                 task_type="CAUSAL_LM")
-        model = get_peft_model(model, peft_config)
+        model = get_peft_model(model, peft_config)#.to(device='cuda')
 
-        for param in filter(lambda p: p.requires_grad,model.parameters()):
-            param.data = param.data.to(torch.float32)
+        # for param in filter(lambda p: p.requires_grad,model.parameters()):
+        #     param.data = param.data.to(torch.float16)
+        
+        # for name, param in filter(lambda np: np[1].requires_grad, model.named_parameters()):
+        #     param.data = param.data.to(torch.float16)
+        #     print(f"Converting {name}: {param.data.shape} {param.data.dtype} to float16")
+        
+        # for name, param in model.named_parameters():
+        #     # print name and dtype of the parameter
+        #     print(name, param.data.dtype)
+        
                
     return model
